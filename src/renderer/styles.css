@@ -361,7 +361,7 @@ webview.provider-view {
   display: flex; background: #fff;
 }
 
-#welcome { position: absolute; inset: 0;
+#welcome {
   position: absolute;
   inset: 0;
   display: flex;

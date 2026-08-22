@@ -20,7 +20,13 @@ for (const [mod, name] of FILES) {
 }
 
 if (process.platform !== 'win32') {
-  const prebuilds = path.join(__dirname, '..', 'node_modules', 'node-pty', 'prebuilds');
+  let prebuilds;
+  try {
+    const ptyPkg = require.resolve('node-pty/package.json');
+    prebuilds = path.join(path.dirname(ptyPkg), 'prebuilds');
+  } catch {
+    prebuilds = path.join(__dirname, '..', 'node_modules', 'node-pty', 'prebuilds');
+  }
   let dirs = [];
   try { dirs = fs.readdirSync(prebuilds); } catch {}
   for (const d of dirs) {

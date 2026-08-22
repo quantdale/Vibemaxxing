@@ -39,15 +39,22 @@ function uniqueDirName(base, exists) {
 // Strictly inside: the root itself is not inside itself, and a sibling that
 // merely shares the prefix (scratch-evil vs scratch) is not inside either.
 // Callers pass realpaths -- resolving symlinks is theirs, comparing is ours.
+// On Windows (and macOS HFS+), paths are case-insensitive: drive letters and
+// segments returned by different APIs can differ in casing, so we normalise
+// before comparing.  path.relative handles the separator and prefix logic.
 function isInsideRoot(abs, root) {
   const a = path.resolve(abs);
   const r = path.resolve(root);
-  return a !== r && a.startsWith(r + path.sep);
+  // Case-insensitive on Windows; macOS is almost always case-insensitive too,
+  // but callers already resolve through realpathSync which normalises casing.
+  const ci = process.platform === 'win32' || process.platform === 'darwin';
+  const rel = path.relative(ci ? r.toLowerCase() : r, ci ? a.toLowerCase() : a);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 // A missing lastUsed never expires, and days <= 0 disables the sweep rather
 // than expiring everything: both failure modes must fail towards keeping files.
-function isExpired(lastUsed, days, now) {
+function isExpired(lastUsed, days, now = Date.now()) {
   if (!Number.isFinite(days) || days <= 0) return false;
   if (!Number.isFinite(lastUsed)) return false;
   return now - lastUsed > days * 86400000;

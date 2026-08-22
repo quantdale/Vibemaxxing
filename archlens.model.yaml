@@ -122,6 +122,8 @@ systems:
       args: []
     - name: workspace:changed
       args: []
+    - name: workspace:swept
+      args: []
     methods:
     - name: chromeUA
       args:
@@ -140,6 +142,8 @@ systems:
       - name: provider
         type: unknown
     - name: setupAllProviderSessions
+      args: []
+    - name: bridgeAllowlist
       args: []
     - name: applyBridgeSetting
       args: []
@@ -394,6 +398,16 @@ systems:
       args: []
     - name: workspaces:setPath
       args: []
+    - name: workspaces:tempName
+      args: []
+    - name: workspaces:addTemp
+      args: []
+    - name: workspaces:discard
+      args: []
+    - name: workspaces:promote
+      args: []
+    - name: workspaces:openFolder
+      args: []
     - name: workspace:getRoot
       args: []
     - name: workspace:tree
@@ -411,6 +425,10 @@ systems:
     - name: workspace:trash
       args: []
     - name: workspace:openPath
+      args: []
+    - name: workspace:revealPath
+      args: []
+    - name: workspace:swept
       args: []
     - name: config:getProviders
       args: []
@@ -487,6 +505,26 @@ systems:
         type: unknown
       - name: name
         type: unknown
+    - name: openWorkspaceFolder
+      args:
+      - name: id
+        type: unknown
+    - name: wsTempName
+      args: []
+    - name: wsAddTemp
+      args:
+      - name: name
+        type: unknown
+    - name: wsDiscard
+      args:
+      - name: id
+        type: unknown
+      - name: termLabels
+        type: unknown
+    - name: wsPromote
+      args:
+      - name: id
+        type: unknown
     - name: setWorkspacePath
       args:
       - name: id
@@ -526,6 +564,14 @@ systems:
     - name: openPath
       args:
       - name: rel
+        type: unknown
+    - name: revealPath
+      args:
+      - name: rel
+        type: unknown
+    - name: filePath
+      args:
+      - name: file
         type: unknown
     - name: getProviders
       args: []
@@ -637,6 +683,10 @@ systems:
       args:
       - name: cb
         type: unknown
+    - name: onWorkspacesSwept
+      args:
+      - name: cb
+        type: unknown
     - name: onDownloadDone
       args:
       - name: cb
@@ -644,6 +694,145 @@ systems:
 - id: renderer
   name: Renderer
   components:
+  - id: layout
+    name: layout
+    kind: module
+    class_name: src/renderer/layout.js
+    methods:
+    - name: leaf
+      args:
+      - name: id
+        type: unknown
+      - name: kind
+        type: unknown
+      - name: ref
+        type: unknown
+    - name: split
+      args:
+      - name: dir
+        type: unknown
+      - name: ratio
+        type: unknown
+      - name: a
+        type: unknown
+      - name: b
+        type: unknown
+    - name: halves
+      args:
+      - name: node
+        type: unknown
+      - name: r
+        type: unknown
+      - name: gutter
+        type: unknown
+    - name: rectsFor
+      args:
+      - name: tree
+        type: unknown
+      - name: rect
+        type: unknown
+      - name: opts
+        type: unknown
+    - name: leaves
+      args:
+      - name: tree
+        type: unknown
+    - name: findLeaf
+      args:
+      - name: tree
+        type: unknown
+      - name: id
+        type: unknown
+    - name: insertRoot
+      args:
+      - name: tree
+        type: unknown
+      - name: node
+        type: unknown
+      - name: edge
+        type: unknown
+      - name: ratio
+        type: unknown
+    - name: dirFor
+      args:
+      - name: rect
+        type: unknown
+    - name: splitLeaf
+      args:
+      - name: tree
+        type: unknown
+      - name: targetId
+        type: unknown
+      - name: newLeaf
+        type: unknown
+      - name: dir
+        type: unknown
+    - name: removeLeaf
+      args:
+      - name: tree
+        type: unknown
+      - name: id
+        type: unknown
+    - name: dividersFor
+      args:
+      - name: tree
+        type: unknown
+      - name: rect
+        type: unknown
+      - name: opts
+        type: unknown
+    - name: setRatio
+      args:
+      - name: tree
+        type: unknown
+      - name: path
+        type: unknown
+      - name: ratio
+        type: unknown
+    - name: clampRatio
+      args:
+      - name: rect
+        type: unknown
+      - name: dir
+        type: unknown
+      - name: ratio
+        type: unknown
+      - name: minPx
+        type: unknown
+    - name: swapLeaves
+      args:
+      - name: tree
+        type: unknown
+      - name: idA
+        type: unknown
+      - name: idB
+        type: unknown
+    - name: moveLeaf
+      args:
+      - name: tree
+        type: unknown
+      - name: dragId
+        type: unknown
+      - name: targetId
+        type: unknown
+      - name: edge
+        type: unknown
+    - name: neighbour
+      args:
+      - name: rects
+        type: unknown
+      - name: fromId
+        type: unknown
+      - name: dir
+        type: unknown
+    - name: migrate
+      args:
+      - name: entry
+        type: unknown
+      - name: mkId
+        type: unknown
+      - name: view
+        type: unknown
   - id: app
     name: app
     kind: module
@@ -661,15 +850,15 @@ systems:
       Fit:
         type: const
         default: window.FitAddon && window.FitAddon.FitAddon
-      PANELS:
+      T:
         type: const
-        default: '{ files: ''#files-panel'', terminal: ''#terminal-panel'' }'
-      DOCKS:
+        default: window.TileTree
+      GUTTER:
         type: const
-        default: '[''left'', ''bottom'', ''right'']'
-      DEFAULT_LAYOUT:
+        default: '6'
+      MIN_PANE:
         type: const
-        default: null
+        default: '140'
       wizStep:
         type: const
         default: '0'
@@ -720,13 +909,21 @@ systems:
         type: unknown
     - name: addWorkspace
       args: []
+    - name: addTempWorkspace
+      args: []
+    - name: discardWorkspace
+      args:
+      - name: ws
+        type: unknown
+    - name: promoteWorkspace
+      args:
+      - name: ws
+        type: unknown
     - name: wsViews
       args:
       - name: wsId
         type: unknown
     - name: saveViews
-      args: []
-    - name: renderTabs
       args: []
     - name: setTabLoading
       args:
@@ -744,19 +941,13 @@ systems:
         type: unknown
       - name: provider
         type: unknown
-    - name: showOnlyWebview
-      args:
-      - name: tabId
-        type: unknown
-    - name: activateTab
-      args:
-      - name: tabId
+      - name: container
         type: unknown
     - name: destroyTabWebview
       args:
       - name: tabId
         type: unknown
-    - name: closeTab
+    - name: closeTabInstance
       args:
       - name: tabId
         type: unknown
@@ -806,33 +997,145 @@ systems:
         type: unknown
     - name: renderAppsMenu
       args: []
-    - name: togglePanel
-      args:
-      - name: force
-        type: unknown
-    - name: fitActiveTerm
+    - name: refitTerms
       args: []
+    - name: killTermByRef
+      args:
+      - name: localId
+        type: unknown
     - name: renderTermMenu
       args: []
+    - name: shellEscapePath
+      args:
+      - name: p
+        type: unknown
+    - name: acceptFileDrop
+      args:
+      - name: el
+        type: unknown
+      - name: onPaths
+        type: unknown
     - name: spawnTerm
       args:
       - name: profile
         type: unknown
-    - name: activateTerm
-      args:
-      - name: id
-        type: unknown
-    - name: renderTermTabs
-      args: []
     - name: closeTerm
       args:
       - name: id
         type: unknown
-    - name: layout
+    - name: newLeafId
       args: []
-    - name: saveLayout
+    - name: newGroupId
       args: []
-    - name: applyLayout
+    - name: groupsOf
+      args:
+      - name: V
+        type: unknown
+    - name: adoptLeafSeq
+      args:
+      - name: all
+        type: unknown
+    - name: groups
+      args: []
+    - name: tiles
+      args: []
+    - name: hostRect
+      args: []
+    - name: paneKey
+      args:
+      - name: lf
+        type: unknown
+    - name: paneShell
+      args:
+      - name: key
+        type: unknown
+      - name: titleText
+        type: unknown
+      - name: dotColor
+        type: unknown
+    - name: mountLeaf
+      args:
+      - name: lf
+        type: unknown
+    - name: applyTiles
+      args: []
+    - name: renderDividers
+      args:
+      - name: S
+        type: unknown
+      - name: host
+        type: unknown
+    - name: focusPane
+      args:
+      - name: leafId
+        type: unknown
+    - name: filesRatio
+      args: []
+    - name: rememberFilesRatio
+      args:
+      - name: leafId
+        type: unknown
+    - name: openFilesPane
+      args: []
+    - name: splitTarget
+      args:
+      - name: S
+        type: unknown
+    - name: openPane
+      args:
+      - name: node
+        type: unknown
+    - name: closePane
+      args:
+      - name: leafId
+        type: unknown
+    - name: destroyPaneEl
+      args:
+      - name: key
+        type: unknown
+    - name: toggleZoom
+      args: []
+    - name: startDividerDrag
+      args:
+      - name: e
+        type: unknown
+      - name: d
+        type: unknown
+    - name: startPaneDrag
+      args:
+      - name: e
+        type: unknown
+      - name: el
+        type: unknown
+    - name: dropTargetAt
+      args:
+      - name: clientX
+        type: unknown
+      - name: clientY
+        type: unknown
+      - name: fromId
+        type: unknown
+    - name: nextGroupName
+      args:
+      - name: gs
+        type: unknown
+    - name: renderGroupBar
+      args: []
+    - name: switchGroup
+      args:
+      - name: id
+        type: unknown
+    - name: addGroup
+      args: []
+    - name: renameGroup
+      args:
+      - name: g
+        type: unknown
+    - name: closeGroup
+      args:
+      - name: id
+        type: unknown
+    - name: focusActivePaneContent
       args: []
     - name: renderSettings
       args: []
@@ -888,6 +1191,8 @@ systems:
       args:
       - name: prefix
         type: unknown
+    depends_on:
+    - renderer.layout
 - id: scripts
   name: Scripts
   components:
@@ -911,3 +1216,5 @@ systems:
 connections:
 - from: preload
   to: main
+- from: renderer
+  to: preload

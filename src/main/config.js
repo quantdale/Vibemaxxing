@@ -9,7 +9,13 @@ const FILES = ['providers.json', 'cli-profiles.json', 'workspaces.json', 'apps.j
 function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
+  } catch (e) {
+    if (e instanceof SyntaxError && fs.existsSync(file)) {
+      // Backup the malformed file so the user can recover their edits.
+      const bak = file + '.bak-' + Date.now();
+      try { fs.copyFileSync(file, bak); } catch {}
+      console.error('[tote] malformed JSON in', file, '— backed up to', bak, '; using defaults.');
+    }
     return fallback;
   }
 }

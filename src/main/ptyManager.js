@@ -24,10 +24,12 @@ function shq(word) {
 // build their bin dir per shell and can switch node version by directory.
 function shellCommand(profile) {
   const args = profile.args || [];
-  // Windows has no login-shell concept and PowerShell already starts with the
-  // user's full PATH, so keep exec'ing directly there.
+  // Windows has no login-shell concept; run CLI profiles via cmd.exe /c so .cmd/.bat
+  // (npm, claude, kimi, codex, etc.) resolve properly on PATH, or powershell if no command.
   if (process.platform === 'win32') {
-    return { file: profile.command || 'powershell.exe', args };
+    if (!profile.command) return { file: 'powershell.exe', args };
+    const comspec = process.env.COMSPEC || 'cmd.exe';
+    return { file: comspec, args: ['/c', profile.command, ...args] };
   }
   const shell = process.env.SHELL || '/bin/bash';
   // -l for the profile files, -i so the interactive rc file (where fnm/nvm/asdf
@@ -75,6 +77,9 @@ class PtyManager {
         sender.send('pty:exit', { id, exitCode });
       } catch {}
     });
+    // If the renderer reloads or is destroyed, kill the PTY so agent
+    // processes don't run forever without a UI attached.
+    if (sender.once) sender.once('destroyed', () => this.kill(id));
     return id;
   }
 

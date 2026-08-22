@@ -206,7 +206,8 @@ function applyBridgeSetting() {
 
 function ping(urlStr) {
   return new Promise((resolve) => {
-    const req = http.get(urlStr, { timeout: 1500 }, (res) => {
+    const client = urlStr.startsWith('https') ? require('https') : http;
+    const req = client.get(urlStr, { timeout: 1500 }, (res) => {
       res.resume();
       resolve(res.statusCode < 500);
     });
@@ -221,10 +222,13 @@ async function ensureLocalService(provider) {
   if (await ping(provider.url)) return { started: true, alreadyRunning: true };
   const child = spawn(provider.local.startCommand, { shell: true, detached: true, stdio: 'ignore' });
   child.unref();
+  let died = false;
+  child.on('exit', () => { died = true; });
   const deadline = Date.now() + 90000;
   while (Date.now() < deadline) {
     await sleep(1200);
     if (await ping(provider.url)) return { started: true, alreadyRunning: false };
+    if (died) throw new Error(`${provider.name} process exited before it could come up at ${provider.url}`);
   }
   throw new Error(`${provider.name} did not come up at ${provider.url} within 90s`);
 }
@@ -258,7 +262,7 @@ const KNOWN_APPS = [
 
 function detectApps() {
   const data = configStore.getApps();
-  if (data.list.length > 0) return; // user already has a list; don't re-seed
+  if (data.seeded) return; // already scanned; user may have emptied the list on purpose
   const plat = process.platform;
   for (const ka of KNOWN_APPS) {
     for (const cand of ka.candidates[plat] || []) {
@@ -268,6 +272,7 @@ function detectApps() {
       }
     }
   }
+  data.seeded = true;
   configStore.saveApps(data);
 }
 
@@ -309,6 +314,11 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+
+  // Null the reference so background tasks (download watcher, bridge, etc.)
+  // that guard on `if (win)` stop sending to a destroyed webContents -- on
+  // macOS closing the window does not quit the app.
+  win.on('closed', () => { win = null; });
 
   // The sweep already ran at startup; the renderer can only be told once it has
   // a toast area to show it in.
@@ -402,6 +412,11 @@ ipcMain.handle('workspaces:setPath', async (e, id) => {
   return wsState();
 });
 
+ipcMain.handle('workspaces:openFolder', (e, id) => {
+  const w = workspace.list().find((x) => x.id === id);
+  if (w && w.path) shell.openPath(w.path);
+});
+
 // --- IPC: temp (scratch) spaces --------------------------------------------
 // A temp space skips the folder picker and can be deleted, files included --
 // the one exception to "removing a space never touches the disk".
@@ -474,10 +489,12 @@ ipcMain.handle('workspace:createFolder', (e, rel) => {
   return true;
 });
 ipcMain.handle('workspace:rename', (e, from, to) => {
+  if (from === '.' || from === '') throw new Error('Cannot rename the workspace root');
   workspace.rename(from, to);
   return true;
 });
 ipcMain.handle('workspace:trash', async (e, rel) => {
+  if (rel === '.' || rel === '') throw new Error('Cannot trash the workspace root');
   await shell.trashItem(workspace.resolveSafe(rel));
   return true;
 });

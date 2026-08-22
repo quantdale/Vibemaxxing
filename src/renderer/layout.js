@@ -186,6 +186,7 @@
   // drop it in on the named side.
   function moveLeaf(tree, dragId, targetId, edge) {
     if (dragId === targetId) return tree;
+    if (!EDGE_DIR[edge]) return tree;   // unknown edge → no-op
     const dragged = findLeaf(tree, dragId);
     if (!dragged || !findLeaf(tree, targetId)) return tree;
     const pruned = removeLeaf(tree, dragId);
@@ -261,16 +262,18 @@
     };
 
     if (L.terminal && L.terminal.visible) {
-      const dir = L.terminal.dock === 'bottom' ? 'col' : 'row';
-      const size = L.terminal.dock === 'bottom' ? (sizes.bottom || 280) / view.h
-                 : (sizes[L.terminal.dock] || 400) / view.w;
-      attach(leaf(mkId(), 'term'), dir, L.terminal.dock === 'left', size);
+      const dir = (L.terminal.dock === 'bottom' || L.terminal.dock === 'top') ? 'col' : 'row';
+      const size = (L.terminal.dock === 'bottom' || L.terminal.dock === 'top')
+                   ? (sizes.bottom || 280) / view.h
+                   : (sizes[L.terminal.dock] || 400) / view.w;
+      attach(leaf(mkId(), 'term'), dir, L.terminal.dock === 'left' || L.terminal.dock === 'top', size);
     }
     if (L.files && L.files.visible) {
-      const dir = L.files.dock === 'bottom' ? 'col' : 'row';
-      const size = L.files.dock === 'bottom' ? (sizes.bottom || 280) / view.h
-                 : (sizes[L.files.dock] || 270) / view.w;
-      attach(leaf(mkId(), 'files'), dir, L.files.dock !== 'right', size);
+      const dir = (L.files.dock === 'bottom' || L.files.dock === 'top') ? 'col' : 'row';
+      const size = (L.files.dock === 'bottom' || L.files.dock === 'top')
+                   ? (sizes.bottom || 280) / view.h
+                   : (sizes[L.files.dock] || 270) / view.w;
+      attach(leaf(mkId(), 'files'), dir, L.files.dock !== 'right' && L.files.dock !== 'bottom', size);
     }
     if (!focus && tree) focus = leaves(tree)[0].id;
     return { tree: tree, focus: focus };

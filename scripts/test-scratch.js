@@ -6,9 +6,13 @@ const S = require('../src/main/scratch.js');
 
 let pass = 0, fail = 0;
 const describe = (name, fn) => { console.log('\n' + name); fn(); };
+let skipped = 0;
 const test = (name, fn) => {
   try { fn(); pass++; console.log('  \x1b[32m✓\x1b[0m ' + name); }
-  catch (e) { fail++; console.log('  \x1b[31m✗\x1b[0m ' + name + '\n      ' + e.message); }
+  catch (e) {
+    if (e && e.skip) { skipped++; console.log('  \x1b[33m-\x1b[0m ' + name + '\n      skipped: ' + e.message); return; }
+    fail++; console.log('  \x1b[31m✗\x1b[0m ' + name + '\n      ' + e.message);
+  }
 };
 
 describe('slug', () => {
@@ -229,7 +233,17 @@ describe('discardTemp', () => {
       fs.mkdirSync(outside, { recursive: true });
       fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
       fs.rmSync(entry.path, { recursive: true, force: true });
-      fs.symlinkSync(outside, entry.path);
+      try {
+        // Windows needs admin rights or Developer Mode for true symlinks; a
+        // directory junction needs neither, and realpathSync resolves both the
+        // same way -- so the attack the guard exists for is simulated either way.
+        fs.symlinkSync(outside, entry.path, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (e) {
+        // Exotic filesystems may support no links at all: skip rather than fail,
+        // since nothing about Tote is broken.
+        e.skip = true;
+        throw e;
+      }
       assert.throws(() => h.wm.discardTemp(id), /scratch root/i);
       assert.strictEqual(fs.existsSync(path.join(outside, 'keep.txt')), true);
     } finally { h.cleanup(); }
@@ -371,5 +385,6 @@ describe('sweepTemp', () => {
   });
 });
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
+console.log('\n' + pass + ' passed, ' + fail + ' failed'
+  + (skipped ? ', ' + skipped + ' skipped' : ''));
 process.exit(fail ? 1 : 0);

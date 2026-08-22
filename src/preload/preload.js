@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('tote', {
   setActiveWorkspace: (id) => ipcRenderer.invoke('workspaces:setActive', id),
   removeWorkspace: (id) => ipcRenderer.invoke('workspaces:remove', id),
   renameWorkspace: (id, name) => ipcRenderer.invoke('workspaces:rename', id, name),
+  openWorkspaceFolder: (id) => ipcRenderer.invoke('workspaces:openFolder', id),
   // temp (scratch) spaces
   wsTempName: () => ipcRenderer.invoke('workspaces:tempName'),
   wsAddTemp: (name) => ipcRenderer.invoke('workspaces:addTemp', name),
@@ -67,10 +68,10 @@ contextBridge.exposeInMainWorld('tote', {
   ptyKill: (id) => ipcRenderer.send('pty:kill', { id }),
   checkCommand: (cmd) => ipcRenderer.invoke('cli:check', cmd),
 
-  // events
-  onPtyData: (cb) => ipcRenderer.on('pty:data', (e, m) => cb(m.id, m.data)),
-  onPtyExit: (cb) => ipcRenderer.on('pty:exit', (e, m) => cb(m.id, m.exitCode)),
-  onWorkspaceChanged: (cb) => ipcRenderer.on('workspace:changed', () => cb()),
-  onWorkspacesSwept: (cb) => ipcRenderer.on('workspace:swept', (e, list) => cb(list)),
-  onDownloadDone: (cb) => ipcRenderer.on('download:done', (e, m) => cb(m)),
+  // events — each returns an unsubscribe function to prevent listener leaks
+  onPtyData: (cb) => { const h = (e, m) => cb(m.id, m.data); ipcRenderer.on('pty:data', h); return () => ipcRenderer.off('pty:data', h); },
+  onPtyExit: (cb) => { const h = (e, m) => cb(m.id, m.exitCode); ipcRenderer.on('pty:exit', h); return () => ipcRenderer.off('pty:exit', h); },
+  onWorkspaceChanged: (cb) => { const h = () => cb(); ipcRenderer.on('workspace:changed', h); return () => ipcRenderer.off('workspace:changed', h); },
+  onWorkspacesSwept: (cb) => { const h = (e, list) => cb(list); ipcRenderer.on('workspace:swept', h); return () => ipcRenderer.off('workspace:swept', h); },
+  onDownloadDone: (cb) => { const h = (e, m) => cb(m); ipcRenderer.on('download:done', h); return () => ipcRenderer.off('download:done', h); },
 });

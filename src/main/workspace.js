@@ -80,7 +80,11 @@ class WorkspaceManager {
 
   active() {
     const data = this.cfg.getWorkspaces();
-    const found = data.list.find((w) => w.id === data.active) || data.list[0];
+    const found = data.list.find((w) => w.id === data.active) || data.list[0] || {
+      id: 'global',
+      name: 'Global',
+      path: path.join(os.homedir(), 'tote', 'workspace'),
+    };
     return { ...found, path: expandTilde(found.path) };
   }
 

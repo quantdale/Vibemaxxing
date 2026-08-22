@@ -77,7 +77,7 @@ function renderWorkspaceSwitcher() {
       hideContextMenu();
       const menu = $('#context-menu');
       menu.innerHTML = '';
-      menu.appendChild(ctxItem('open folder', () => tote.openPath('.')));
+      menu.appendChild(ctxItem('open folder', () => tote.openWorkspaceFolder(w.id)));
       menu.appendChild(ctxItem('copy path', () => navigator.clipboard.writeText(w.path)));
       menu.appendChild(ctxItem('rename…', () => renameWorkspace(w)));
       menu.appendChild(ctxItem('change folder…', () => changeWorkspaceFolder(w)));
@@ -267,7 +267,8 @@ function setTabLoading(tabId, on) {
 }
 
 // Open a provider as a new pane in the active space.
-function openTab(providerId) {
+async function openTab(providerId) {
+  try { await tote.ensureLocal(providerId); } catch (e) { toast(e.message, 'error'); }
   const V = wsViews();
   const tab = { id: newId('t'), providerId };
   V.tabs.push(tab);
@@ -285,8 +286,11 @@ function ensureWebview(tab, provider, container) {
   wv.addEventListener('did-start-loading', () => setTabLoading(tab.id, true));
   wv.addEventListener('did-stop-loading', () => setTabLoading(tab.id, false));
   wv.addEventListener('page-title-updated', (e) => {
-    const btn = document.querySelector(`[data-tab="${tab.id}"]`);
-    if (btn) btn.title = e.title || provider.url;
+    const p = panes.get('web:' + tab.id);
+    if (p && e.title) {
+      p.title.textContent = e.title;
+      p.el.title = e.title + ' · ' + provider.name;
+    }
   });
   wv.addEventListener('did-fail-load', (e) => {
     // -3 = ABORTED (normal during redirects); ignore subframe failures
@@ -298,6 +302,7 @@ function ensureWebview(tab, provider, container) {
     const en = state.tabs.get(tab.id);
     if (en) en.wv = null; // pane stays; the next applyTiles recreates the webview
     toast(provider.name + ' pane crashed - it will reload.', 'error');
+    applyTiles();          // trigger layout to recreate the webview
   });
   (container || $('#tiles')).appendChild(wv);
   entry = { wv, providerId: provider.id, wsId: state.workspaces.active };
@@ -531,7 +536,12 @@ async function newFolder(baseDir = '.') {
 }
 
 async function sendToTab(relPath) {
-  const en = state.activeTab && state.tabs.get(state.activeTab);
+  const S = tiles();
+  const focusedLeaf = S.focus && T.findLeaf(S.tree, S.focus);
+  const targetLeaf = (focusedLeaf && focusedLeaf.kind === 'web')
+    ? focusedLeaf
+    : T.leaves(S.tree).find((l) => l.kind === 'web');
+  const en = targetLeaf && state.tabs.get(targetLeaf.ref);
   if (!en || !en.wv) {
     toast('Open a web tab first, then send the file.', 'error');
     return;
@@ -777,6 +787,12 @@ async function spawnTerm(profile) {
 
   try {
     const res = await tote.ptySpawn(profile.id, term.cols || 80, term.rows || 24);
+    // Guard: the pane may have been closed while spawning -- kill the new PTY
+    // instead of orphaning it with no UI attached.
+    if (!state.terms.has(id)) {
+      tote.ptyKill(res.id);
+      return;
+    }
     entry.ptyId = res.id;
     entry.alive = true;
     pane.el.title = res.workspace + ' · cwd: ' + res.cwd;
@@ -847,6 +863,9 @@ $('#btn-new-term').onclick = async (e) => {
     menu.classList.add('hidden');
   }
 };
+document.addEventListener('click', (e) => {
+  if (!$('#add-term-wrap').contains(e.target)) $('#term-menu').classList.add('hidden');
+});
 
 
 /* ---------------- tiling layout ----------------
@@ -1003,7 +1022,11 @@ function applyTiles() {
 
   // prune leaves whose instance no longer exists
   for (const lf of T.leaves(S.tree)) {
-    if (!mountLeaf(lf)) { S.tree = T.removeLeaf(S.tree, lf.id); if (S.focus === lf.id) S.focus = null; }
+    if (!mountLeaf(lf)) {
+      S.tree = T.removeLeaf(S.tree, lf.id);
+      if (S.focus === lf.id) S.focus = null;
+      destroyPaneEl(paneKey(lf));   // clean up the orphaned DOM element
+    }
   }
   const live = T.leaves(S.tree);
   if (!live.some((l) => l.id === S.focus)) S.focus = live.length ? live[0].id : null;
@@ -1051,14 +1074,15 @@ function renderDividers(S, host) {
 
 function focusPane(leafId) {
   const S = tiles();
-  if (!leafId || S.focus === leafId) return;
-  S.focus = leafId;
-  for (const p of panes.values()) p.el.classList.toggle('focused', p.el.dataset.leaf === leafId);
+  if (!leafId) return;
   const lf = T.findLeaf(S.tree, leafId);
   if (lf && lf.kind === 'term') {
     const t = [...state.terms.values()].find((x) => x.ptyId === lf.ref || x.localId === lf.ref);
     if (t) t.term.focus();
   }
+  if (S.focus === leafId) return;
+  S.focus = leafId;
+  for (const p of panes.values()) p.el.classList.toggle('focused', p.el.dataset.leaf === leafId);
   saveViews();
 }
 
