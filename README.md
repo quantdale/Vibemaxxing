@@ -90,8 +90,8 @@ On networks that block GitHub release downloads (packaging needs the electron /
 winCodeSign archives), point electron-builder at a mirror instead:
 
 ```powershell
-set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+set ELECTRON_MIRROR=https://cdn.npmmirror.com/binaries/electron/
+set ELECTRON_BUILDER_BINARIES_MIRROR=https://cdn.npmmirror.com/binaries/electron-builder-binaries/
 npm run pack
 ```
 
