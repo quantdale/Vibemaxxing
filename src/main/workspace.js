@@ -290,6 +290,12 @@ class WorkspaceManager {
   }
 
   inboxDir(providerId) {
+    // Provider ids come from config data, but they end up as a PATH segment;
+    // anything separator-like would move files out of inbox/. Legit ids are
+    // slugs ('kimi', '_desktop'), so refuse the rest outright.
+    if (providerId && /[/\\:*?"<>|]/.test(String(providerId))) {
+      throw new Error('Invalid provider id: ' + providerId);
+    }
     return providerId
       ? path.join(this.getRoot(), 'inbox', providerId)
       : path.join(this.getRoot(), 'inbox');
@@ -297,11 +303,31 @@ class WorkspaceManager {
 
   /* ----- file ops (active workspace) ----- */
 
+  // Containment rule: a renderer-supplied workspace-relative path may never
+  // resolve outside the REAL active workspace root — including through a
+  // symlink or directory junction planted inside it. Two checks, both required:
+  //   1. lexical: `..`, absolute inputs and drive switches never pass;
+  //   2. real: the path is walked through every symlink that exists
+  //      (realpathDeepest) and compared against the equally-resolved root.
+  // Paths that do not exist yet stay legal: realpathDeepest resolves the
+  // deepest existing ancestor and re-appends the remainder, so creating
+  // new/deep/file.txt still works while new/../..\escape still fails.
+  // The comparison itself is S.isInsideRoot — strict-inside semantics,
+  // case-insensitive where the platform is. Returns the LEXICAL path; callers
+  // open/create against it exactly as before, containment is validation only.
   resolveSafe(rel) {
-    const abs = path.resolve(this.getRoot(), rel);
+    if (typeof rel !== 'string' || rel === '') {
+      throw new Error('Path escapes workspace root: ' + JSON.stringify(rel));
+    }
     const rootAbs = path.resolve(this.getRoot());
+    const abs = path.resolve(rootAbs, rel);
     if (abs !== rootAbs && !abs.startsWith(rootAbs + path.sep)) {
-      throw new Error('Path escapes workspace root');
+      throw new Error('Path escapes workspace root: ' + rel);
+    }
+    const rootReal = realpathDeepest(rootAbs);
+    const real = realpathDeepest(abs);
+    if (real !== rootReal && !S.isInsideRoot(real, rootReal)) {
+      throw new Error('Path escapes workspace root (symlink): ' + rel);
     }
     return abs;
   }
