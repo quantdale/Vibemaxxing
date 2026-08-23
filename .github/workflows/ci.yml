@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    # The primary target: a fresh Windows checkout must install, test, doctor
+    # and package cleanly.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (lockfile)
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Doctor (CI mode)
+        run: npm run doctor -- --ci
+
+      - name: PTY smoke under Electron
+        run: npm run smoke:pty
+
+      - name: Package (unpacked)
+        run: npm run pack
+
+      - name: Build NSIS installer
+        run: npm run dist:win
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tote-win-installer
+          path: dist/*.exe
+          if-no-files-found: error
+
+  linux:
+    # Cross-platform health: same install/tests on Linux.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # node-pty has no linux prebuilds, so npm ci compiles it from source;
+      # the runner image already ships build-essential + python.
+      - name: Install dependencies (lockfile)
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Doctor (CI mode)
+        run: npm run doctor -- --ci
