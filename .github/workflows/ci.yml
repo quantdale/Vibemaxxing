@@ -34,6 +34,9 @@ jobs:
         run: npm run pack
 
       - name: Build NSIS installer
+        # predist:win seeds the winCodeSign cache first - runners are not
+        # elevated, so electron-builder's own extraction dies on the two
+        # darwin symlinks in that archive.
         run: npm run dist:win
 
       - name: Upload installer artifact

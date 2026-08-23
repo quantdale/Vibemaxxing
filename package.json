@@ -14,6 +14,7 @@
     "start": "electron .",
     "test": "node scripts/test-layout.js && node scripts/test-scratch.js && node scripts/test-syscheck.js",
     "doctor": "node scripts/doctor.js",
+    "predist:win": "node scripts/win-sign-cache.js",
     "smoke:pty": "node scripts/smoke-pty.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
