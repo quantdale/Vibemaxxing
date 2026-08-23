@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('tote', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getViews: () => ipcRenderer.invoke('views:get'),
   saveViews: (v) => ipcRenderer.invoke('views:save', v),
+  saveViewsNow: (v) => ipcRenderer.send('views:save-now', v),
   saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
 
   // native apps

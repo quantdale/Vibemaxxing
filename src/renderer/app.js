@@ -255,8 +255,20 @@ function wsViews(wsId = state.workspaces.active) {
 let saveViewsTimer = null;
 function saveViews() {
   clearTimeout(saveViewsTimer);
-  saveViewsTimer = setTimeout(() => tote.saveViews(state.views), 200);
+  saveViewsTimer = setTimeout(() => {
+    saveViewsTimer = null;
+    tote.saveViews(state.views);
+  }, 200);
 }
+// A debounced save pending at shutdown would die with the async invoke and
+// silently drop the last interaction's state — flush it fire-and-forget.
+addEventListener('beforeunload', () => {
+  if (saveViewsTimer) {
+    clearTimeout(saveViewsTimer);
+    saveViewsTimer = null;
+    tote.saveViewsNow(state.views);
+  }
+});
 const providerOf = (id) => state.providers.find((p) => p.id === id);
 const newId = (prefix) => prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 

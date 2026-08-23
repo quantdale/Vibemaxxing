@@ -153,7 +153,8 @@ await test('restart restores durable state: tabs, groups and layout come back', 
       [...document.querySelectorAll('.group-chip')]
         .find((c) => c.textContent.trim() === '1').click();
     });
-    await sleep(600);   // cover saveViews' debounce before quitting
+    // NO grace sleep: quit while the debounced save is still pending. The
+    // beforeunload flush must land the state anyway.
   } finally {
     await first.app.close();   // keep the fixture alive for the relaunch
     await sleep(400);

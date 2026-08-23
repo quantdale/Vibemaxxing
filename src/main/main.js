@@ -533,6 +533,12 @@ ipcMain.handle('views:save', (e, data) => {
   configStore.saveViews(data);
   return true;
 });
+// Fire-and-forget variant for shutdown: the renderer's debounced save can
+// still be pending when the window unloads, and an async invoke would die
+// with it. This channel is what beforeunload uses to push the last state.
+ipcMain.on('views:save-now', (e, data) => {
+  configStore.saveViews(data);
+});
 
 ipcMain.handle('settings:get', () => configStore.getSettings());
 ipcMain.handle('settings:save', (e, s) => {
@@ -614,8 +620,13 @@ ipcMain.handle('tab:sendFile', async (e, { wcId, relPath }) => {
   const abs = workspace.resolveSafe(relPath);
   const stat = fs.statSync(abs);
   if (stat.size > SEND_FILE_MAX) throw new Error('File too large for in-page attach (> 15 MB)');
-  const wc = webContents.fromId(wcId);
-  if (!wc) throw new Error('Tab is not ready yet - click it first, then retry.');
+  // Only a provider webview may receive the injected File — never this shell
+  // window or any other frame, whatever id the caller passes.
+  const wc = webContents.fromId(Number(wcId));
+  if (!wc || wc.isDestroyed()) throw new Error('Tab is not ready yet - click it first, then retry.');
+  if (wc.getType() !== 'webview' || wc === e.sender) {
+    throw new Error('tab:sendFile targets provider tabs only');
+  }
   const b64 = fs.readFileSync(abs).toString('base64');
   const name = path.basename(abs);
   const script = `(async () => {
