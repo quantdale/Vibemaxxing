@@ -5,10 +5,16 @@
   "description": "One window for all your LLMs - web apps, native apps and CLI agents organized around workspaces.",
   "main": "src/main/main.js",
   "license": "MIT",
+  "author": "quantdale",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "postinstall": "node scripts/copy-vendor.js",
     "start": "electron .",
-    "test": "node scripts/test-layout.js && node scripts/test-scratch.js",
+    "test": "node scripts/test-layout.js && node scripts/test-scratch.js && node scripts/test-syscheck.js",
+    "doctor": "node scripts/doctor.js",
+    "smoke:pty": "node scripts/smoke-pty.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux",
@@ -18,6 +24,8 @@
   "build": {
     "appId": "com.tote.app",
     "productName": "Tote",
+    "electronVersion": "37.10.3",
+    "npmRebuild": false,
     "files": [
       "src/**/*",
       "config/**/*",
@@ -62,7 +70,7 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
-    "electron": "^37.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "37.10.3",
+    "electron-builder": "25.1.8"
   }
 }
