@@ -96,6 +96,13 @@ let workspace;
 let ptys;
 let swept = [];   // stale temp spaces removed at launch, reported once the UI is up
 
+// Test isolation hook: E2E/smoke runs set TOTE_USER_DATA_DIR so they never
+// touch the developer's real config, logins or workspaces. Ordinary launches
+// never see the variable and behave exactly as before.
+if (process.env.TOTE_USER_DATA_DIR) {
+  app.setPath('userData', path.resolve(process.env.TOTE_USER_DATA_DIR));
+}
+
 const partitionFor = (providerId) => `persist:tote-${providerId}`;
 
 function uniquePath(p) {

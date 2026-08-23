@@ -16,6 +16,8 @@
     "doctor": "node scripts/doctor.js",
     "predist:win": "node scripts/win-sign-cache.js",
     "smoke:pty": "node scripts/smoke-pty.js",
+    "test:e2e": "node scripts/test-e2e.js",
+    "smoke:packaged": "node scripts/smoke-packaged.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux",
@@ -72,6 +74,7 @@
   },
   "devDependencies": {
     "electron": "37.10.3",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "playwright-core": "^1.62.1"
   }
 }
