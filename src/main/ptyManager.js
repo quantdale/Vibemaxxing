@@ -1,5 +1,7 @@
 // PTY manager: spawns CLI agents (Claude Code, Kimi CLI, ...) in real
 // pseudo-terminals so their TUIs render correctly in xterm.js.
+const { classifyPtyProblem } = require('./syscheck');
+
 let pty = null;
 let ptyLoadError = null;
 try {
@@ -49,7 +51,11 @@ class PtyManager {
   }
 
   available() {
-    return { ok: !!pty, error: ptyLoadError };
+    // Classified so the wizard can say WHY terminals are down (package
+    // missing vs wrong ABI vs toolchain) instead of a bare "unavailable".
+    const ok = !!pty;
+    const cls = classifyPtyProblem(ok ? '' : ptyLoadError);
+    return { ok, error: ptyLoadError, kind: cls.kind, label: cls.label, hint: cls.hint };
   }
 
   spawn(profile, cwd, cols, rows, sender) {

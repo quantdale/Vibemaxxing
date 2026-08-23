@@ -1685,11 +1685,12 @@ async function renderWzSystem() {
     ['Node.js', s.node ? 'v' + s.node : null, 'install Node 20+ from nodejs.org'],
     ['npm', s.npm ? 'v' + s.npm : null, 'ships with Node.js'],
     ['git', s.git, 'needed for project spaces and many agents'],
-    ['terminal layer (node-pty)', s.pty.ok ? 'ok' : null, 'run: npm rebuild node-pty (needs build tools)'],
+    ['terminal layer (node-pty)', s.pty.ok ? 'ok' : null,
+      s.pty.ok ? '' : [s.pty.label, s.pty.hint].filter(Boolean).join(' - ') || 'run: npm rebuild node-pty'],
     ['home folder writable', s.homeWritable ? 'ok' : null, 'check permissions on your home directory'],
   ];
   for (const [label, val, hint] of rows) {
-    wzRow(host, label, val ? 'ok' : 'bad', val || 'missing — ' + hint, null);
+    wzRow(host, label, val ? 'ok' : 'bad', val || (hint ? 'missing - ' + hint : 'missing'), null);
   }
 }
 
@@ -1870,7 +1871,10 @@ tote.onDownloadDone((m) => {
 (async function init() {
   const avail = await tote.ptyAvailable();
   if (!avail.ok) {
-    toast('node-pty unavailable - terminals disabled. Rebuild with: npm rebuild node-pty', 'error');
+    toast(
+      `terminals disabled: ${avail.label || 'node-pty unavailable'}${avail.hint ? ' - fix: ' + avail.hint : ''}`,
+      'error',
+    );
   }
   state.providers = await tote.getProviders();
   state.profiles = await tote.getCliProfiles();

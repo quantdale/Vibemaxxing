@@ -6,11 +6,12 @@ const { app, BrowserWindow, ipcMain, dialog, shell, session, webContents } = req
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn, execSync, execFileSync } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { ConfigStore } = require('./config');
 const { WorkspaceManager, originApp } = require('./workspace');
 const { PtyManager } = require('./ptyManager');
 const { systemCheck, claudeStatus, bindClaudeToWorkspace, mcpSnippet } = require('./installer');
+const { resolveCommand } = require('./syscheck');
 
 // LLM sites (Cloudflare-fronted ones especially) reject UAs that don't match
 // the real engine. Use Electron's own UA with the Electron/Tote tokens
@@ -650,14 +651,10 @@ ipcMain.on('pty:kill', (e, { id }) => ptys.kill(id));
 
 ipcMain.handle('cli:check', (e, command) => {
   if (!command) return true; // plain shell profile always works
-  try {
-    const cmd =
-      process.platform === 'win32' ? `where "${command}"` : `command -v "${command}"`;
-    execSync(cmd, { stdio: 'ignore', shell: process.platform === 'win32' ? undefined : '/bin/sh' });
-    return true;
-  } catch {
-    return false;
-  }
+  // resolveCommand is truthful about the native OS: `where`/`which` only see
+  // executables this platform can launch, so a WSL-only binary is correctly
+  // reported missing rather than promised as available.
+  return !!resolveCommand(command);
 });
 
 // --- IPC: misc ---------------------------------------------------------------------------------------

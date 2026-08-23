@@ -29,11 +29,12 @@ function systemCheck(ptys) {
   } catch {
     homeWritable = false;
   }
+  const avail = ptys.available();
   return {
     node: process.versions.node,
     npm: cmdVersion('npm'),
     git: cmdVersion('git'),
-    pty: ptys.available(),
+    pty: avail,
     homeWritable,
     platform: process.platform,
   };
