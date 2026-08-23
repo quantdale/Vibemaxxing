@@ -124,6 +124,10 @@ systems:
       args: []
     - name: workspace:swept
       args: []
+    - name: views:save-now
+      args:
+      - name: data
+        type: unknown
     methods:
     - name: chromeUA
       args:
@@ -179,7 +183,42 @@ systems:
     - main.config
     - main.installer
     - main.ptymanager
+    - main.syscheck
     - main.workspace
+  - id: syscheck
+    name: syscheck
+    kind: module
+    class_name: src/main/syscheck.js
+    methods:
+    - name: parseVersion
+      args:
+      - name: v
+        type: unknown
+    - name: nodeMajorOk
+      args:
+      - name: version
+        type: unknown
+      - name: minMajor
+        type: unknown
+    - name: classifyPtyProblem
+      args:
+      - name: message
+        type: unknown
+    - name: classifyDoctor
+      args:
+      - name: items
+        type: unknown
+    - name: electronVersionMismatch
+      args:
+      - name: spec
+        type: unknown
+    - name: resolveCommand
+      args:
+      - name: cmd
+        type: unknown
+      - name: opts
+        type: unknown
+    depends_on: []
   - id: ptymanager
     name: ptyManager
     kind: module

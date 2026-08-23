@@ -40,14 +40,25 @@ First-run setup wizard — system checks, one-click CLI installs, connections, s
 
 ## Quick start
 
-Requires **Node.js 20+** and (for terminals) a C++ toolchain:
+Requires **Node.js 20+**. Terminals use `node-pty`, which ships prebuilt
+N-API binaries for Windows, macOS and common Linux — you only need a C++
+toolchain if no prebuild matches your platform (some Linux distros) or Node
+ABI:
 
 - **Linux:** `sudo apt install build-essential python3`
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
-- **Windows:** Visual Studio Build Tools
+- **Windows:** usually nothing; otherwise Visual Studio Build Tools
+
+**Windows** (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+**Linux / macOS**:
 
 ```bash
-./scripts/install.sh        # checks prerequisites, installs deps, launches
+./scripts/install.sh       # checks prerequisites, installs deps, launches
 # or manually:
 npm install && npm start
 ```
@@ -74,6 +85,40 @@ Troubleshooting: if terminals fail with `posix_spawnp failed`, run `npm install`
 run through your login shell, so a CLI that works in your own terminal works here too —
 including ones installed via fnm/nvm/asdf, which a desktop app otherwise can't see. Right-click a
 web tab for **reload** / **close**.
+
+On networks that block GitHub release downloads (packaging needs the electron /
+winCodeSign archives), point electron-builder at a mirror instead:
+
+```powershell
+set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+npm run pack
+```
+
+`npm run dist:win` also repairs electron-builder's winCodeSign cache
+automatically first (`predist:win`) — unprivileged Windows cannot extract the
+two macOS symlinks inside that archive.
+
+## Testing & certification
+
+| Gate | What it proves |
+|---|---|
+| `npm test` | pure engines + durability: tiling layout, temp-space guards, syscheck classification, transactional config writes, symlink/junction workspace containment |
+| `npm run test:e2e` | the real Electron app end to end — boot/persistence, workspace routing, PTY cwd routing, webview never-reparented invariant, download routing into `<active>/inbox/<provider>/`, uploads, wizard — against an isolated profile and a local fixture provider (no live LLM sites, no external network) |
+| `npm run doctor -- --ci` | the machine can actually run/build Tote |
+| `npm run smoke:pty` | a real PTY spawns under the Electron runtime |
+| `npm run smoke:packaged` | the packaged binary boots, exposes the bridge, answers IPC, exits cleanly |
+
+E2E and packaged smoke never touch your real Tote state: they redirect
+userData via a `TOTE_USER_DATA_DIR` environment variable (a test-only hook in
+the main process) and point every seeded path inside a throwaway folder.
+Failure screenshots land in `test-results/`.
+
+CI runs all of the above on `windows-latest` (plus the NSIS installer build)
+and install/tests/doctor on Linux. A macOS lane is deliberate deferred debt:
+Tote ships a DMG, but hosted mac runners for every push are disproportionate
+today and the Downloads bridge stays inert without native apps stamping
+quarantine xattrs.
 
 ### Build real installers
 

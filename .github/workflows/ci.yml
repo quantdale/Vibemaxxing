@@ -5,11 +5,20 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
-    # The primary target: a fresh Windows checkout must install, test, doctor
-    # and package cleanly.
+    # The primary release lane: a fresh Windows checkout must install, test,
+    # doctor, run the real-app E2E, package, launch the packaged build and
+    # produce the NSIS installer.
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +30,7 @@ jobs:
       - name: Install dependencies (lockfile)
         run: npm ci --no-audit --no-fund
 
-      - name: Unit tests
+      - name: Unit & regression tests
         run: npm test
 
       - name: Doctor (CI mode)
@@ -30,8 +39,14 @@ jobs:
       - name: PTY smoke under Electron
         run: npm run smoke:pty
 
+      - name: Electron E2E (real app, isolated profile)
+        run: npm run test:e2e
+
       - name: Package (unpacked)
         run: npm run pack
+
+      - name: Packaged-app smoke
+        run: npm run smoke:packaged
 
       - name: Build NSIS installer
         # predist:win seeds the winCodeSign cache first - runners are not
@@ -46,9 +61,19 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
 
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tote-e2e-failures
+          path: |
+            test-results/
+          if-no-files-found: ignore
+
   linux:
-    # Cross-platform health: same install/tests on Linux.
+    # Cross-platform health: same install/tests/doctor on Linux.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -62,8 +87,13 @@ jobs:
       - name: Install dependencies (lockfile)
         run: npm ci --no-audit --no-fund
 
-      - name: Unit tests
+      - name: Unit & regression tests
         run: npm test
 
       - name: Doctor (CI mode)
         run: npm run doctor -- --ci
+
+# macOS lane: deliberately deferred. Tote ships a DMG and carries the
+# macOS-only Downloads bridge, but a hosted macos runner for every push is
+# disproportionate today; the bridge is also inert unless a native LLM app
+# stamps quarantine xattrs. Tracked as known debt in README (Testing section).
