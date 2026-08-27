@@ -2,6 +2,7 @@
 // "Active workspace" is the routing context: downloads from web tabs,
 // bridged files from native apps, and new CLI terminals all land here.
 const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
@@ -65,6 +66,7 @@ class WorkspaceManager {
     this.cfg = configStore;
     this.watcher = null;
     this.dlWatcher = null;
+    this.watchTimer = null;
     fs.mkdirSync(this.inboxDir(), { recursive: true });
   }
 
@@ -336,30 +338,35 @@ class WorkspaceManager {
     return TEXT_EXT.has(path.extname(name).toLowerCase());
   }
 
-  tree(depth = 5) {
-    const walk = (abs, rel, d) => {
+  // Depth-limited listing of the active workspace. Async (fs.promises, one
+  // readdir per directory running concurrently) so a large tree never blocks
+  // the main process: this is triggered by every filesystem event batch while
+  // the app is open, and the main thread freezes for its whole duration if it
+  // walks synchronously. Output shape and order are identical to the old sync
+  // walk -- dirs before files, localeCompare within each directory.
+  async tree(depth = 5) {
+    const walk = async (abs, rel, d) => {
       let entries;
       try {
-        entries = fs.readdirSync(abs, { withFileTypes: true });
+        entries = await fsp.readdir(abs, { withFileTypes: true });
       } catch {
         return [];
       }
       const out = [];
-      for (const e of entries) {
-        if (IGNORE.has(e.name)) continue;
-        const childAbs = path.join(abs, e.name);
+      await Promise.all(entries.map(async (e) => {
+        if (IGNORE.has(e.name)) return;
         const childRel = rel === '.' ? e.name : rel + '/' + e.name;
         if (e.isDirectory()) {
           out.push({
             name: e.name,
             path: childRel,
             type: 'dir',
-            children: d > 0 ? walk(childAbs, childRel, d - 1) : [],
+            children: d > 0 ? await walk(path.join(abs, e.name), childRel, d - 1) : [],
           });
         } else if (e.isFile()) {
           out.push({ name: e.name, path: childRel, type: 'file', text: this.isTextFile(e.name) });
         }
-      }
+      }));
       out.sort((a, b) =>
         a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name),
       );
@@ -421,15 +428,21 @@ class WorkspaceManager {
   watch(callback) {
     const chokidar = require('chokidar');
     if (this.watcher) this.watcher.close();
-    let timer = null;
+    // A pending debounce from the previous root must not fire after the
+    // switch: it would push a stale 'workspace:changed' into the renderer and
+    // cost a tree rebuild nobody asked for.
+    if (this.watchTimer) { clearTimeout(this.watchTimer); this.watchTimer = null; }
     this.watcher = chokidar.watch(this.getRoot(), {
       ignoreInitial: true,
       depth: 5,
       ignored: (p) => IGNORE.has(path.basename(p)),
     });
     this.watcher.on('all', () => {
-      clearTimeout(timer);
-      timer = setTimeout(callback, 200);
+      clearTimeout(this.watchTimer);
+      this.watchTimer = setTimeout(() => {
+        this.watchTimer = null;
+        callback();
+      }, 200);
     });
   }
 

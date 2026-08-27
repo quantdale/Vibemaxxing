@@ -1,26 +1,35 @@
 // Setup & connection helpers for the first-run wizard.
 // System checks, CLI install status, and wiring external apps
 // (Claude Desktop, any MCP client) to the active workspace.
-const { execSync } = require('child_process');
+//
+// Everything that touches other processes here is ASYNC: this module is
+// consumed by Electron's main process (the setup wizard runs inside the app),
+// and the old execSync probes parked that process for up to 8s per command
+// -- with the npm and git checks serialized on top of each other. The same
+// results now arrive in parallel via child_process.execFile callbacks.
+const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 function cmdVersion(cmd) {
-  try {
-    return execSync(`${cmd} --version`, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      shell: process.platform === 'win32' ? undefined : '/bin/sh',
-      timeout: 8000,
-    })
-      .toString()
-      .trim();
-  } catch {
-    return null;
-  }
+  return new Promise((resolve) => {
+    // On POSIX a plain execFile cannot run PATH shims like `npm` (a shell
+    // script), so it goes through /bin/sh as before; on Windows cmd resolves
+    // the .cmd shim, matching the old shell-free spawn semantics.
+    execFile(
+      cmd,
+      ['--version'],
+      {
+        timeout: 8000,
+        shell: process.platform === 'win32' ? undefined : '/bin/sh',
+      },
+      (err, stdout) => resolve(err ? null : String(stdout).trim()),
+    );
+  });
 }
 
-function systemCheck(ptys) {
+async function systemCheck(ptys) {
   let homeWritable = true;
   const probe = path.join(os.homedir(), '.tote-write-test');
   try {
@@ -29,11 +38,15 @@ function systemCheck(ptys) {
   } catch {
     homeWritable = false;
   }
-  const avail = ptys.available();
+  const [avail, npm, git] = await Promise.all([
+    Promise.resolve(ptys.available()),   // cheap and local, but kept in the fan-out
+    cmdVersion('npm'),
+    cmdVersion('git'),
+  ]);
   return {
     node: process.versions.node,
-    npm: cmdVersion('npm'),
-    git: cmdVersion('git'),
+    npm,
+    git,
     pty: avail,
     homeWritable,
     platform: process.platform,

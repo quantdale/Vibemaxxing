@@ -15,6 +15,54 @@ function shq(word) {
   return `'${String(word).replace(/'/g, `'\\''`)}'`;
 }
 
+/* ----- pty:data coalescing ------------------------------------------------
+ * node-pty emits onData per read() -- often a few bytes at a time -- and every
+ * emission used to cross into the renderer as its own IPC message. A busy TUI
+ * repaint or `cat` of a large file produces thousands of messages per second,
+ * each paying object allocation, serialization, and a renderer dispatch.
+ * Coalescing appends chunks into one buffer per session and flushes it once
+ * per short window: xterm.js paints on animation frames anyway, so a few
+ * milliseconds of batching is invisible to the eye while collapsing the
+ * message count by orders of magnitude. Order is preserved exactly --
+ * concatenation of the same chunks in the same sequence. The pure piece lives
+ * here so scripts/test-ptybatch.js can exercise it without a real PTY. */
+const FLUSH_DELAY_MS = 4;         // well under a frame; typing echo stays instant to feel
+const FLUSH_MAX_BYTES = 256 * 1024; // bound memory when output outruns the flush window
+
+// Build a chunk sink whose send() is called with batched data.
+//   send(data)    -- called with coalesced chunks, in order, never empty.
+// Returns { push(chunk), flush(), discard() }.
+function makeDataCoalescer(send, opts) {
+  const delay = (opts && opts.delayMs) !== undefined ? opts.delayMs : FLUSH_DELAY_MS;
+  const maxBytes = (opts && opts.maxBytes) !== undefined ? opts.maxBytes : FLUSH_MAX_BYTES;
+  let pending = '';
+  let timer = null;
+
+  const emit = () => {
+    if (!pending) { if (timer) { clearTimeout(timer); timer = null; } return; }
+    const data = pending;
+    pending = '';
+    if (timer) { clearTimeout(timer); timer = null; }
+    send(data);
+  };
+
+  return {
+    push(chunk) {
+      pending += chunk;
+      if (pending.length >= maxBytes) return emit();  // keep memory bounded under gushes
+      if (timer === null && delay > 0) timer = setTimeout(emit, delay);
+      else if (delay <= 0) queueMicrotask(emit);
+    },
+    flush: emit,
+    // Stop batching without sending what remains -- used only where nothing
+    // should arrive afterwards.
+    discard() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      pending = '';
+    },
+  };
+}
+
 // What to actually hand pty.spawn() for a CLI profile.
 //
 // A GUI-launched app inherits a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin on
@@ -47,6 +95,7 @@ function shellCommand(profile) {
 class PtyManager {
   constructor() {
     this.sessions = new Map();
+    this.flushers = new Map();   // id -> coalescer for that session's output
     this.nextId = 1;
   }
 
@@ -72,17 +121,26 @@ class PtyManager {
     });
     const id = this.nextId++;
     this.sessions.set(id, proc);
-    proc.onData((data) => {
+
+    // Output arrives per read; batch it (see makeDataCoalescer) so a chatty
+    // TUI costs dozens of IPC messages a second instead of thousands.
+    const batch = makeDataCoalescer((data) => {
       try {
         sender.send('pty:data', { id, data });
       } catch {}
     });
-    proc.onExit(({ exitCode }) => {
+    this.flushers.set(id, batch);   // kill() must be able to drain the tail
+    proc.onData((chunk) => batch.push(chunk));
+    const exit = ({ exitCode }) => {
+      // Drain whatever is still buffered so no output dies in flight.
+      this.flushers.delete(id);
+      batch.flush();
       this.sessions.delete(id);
       try {
         sender.send('pty:exit', { id, exitCode });
       } catch {}
-    });
+    };
+    proc.onExit(exit);
     // If the renderer reloads or is destroyed, kill the PTY so agent
     // processes don't run forever without a UI attached.
     if (sender.once) sender.once('destroyed', () => this.kill(id));
@@ -110,6 +168,10 @@ class PtyManager {
         s.kill();
       } catch {}
       this.sessions.delete(id);
+      // The process is going away; push out any buffered bytes before the
+      // onExit drain, so the tail never waits for a timer it will beat.
+      const batch = this.flushers.get(id);
+      if (batch) { this.flushers.delete(id); batch.flush(); }
     }
   }
 
@@ -118,4 +180,4 @@ class PtyManager {
   }
 }
 
-module.exports = { PtyManager };
+module.exports = { PtyManager, makeDataCoalescer };

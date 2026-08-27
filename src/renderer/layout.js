@@ -68,9 +68,16 @@
     return out;
   }
 
+  // Early-exit DFS. The previous version materialized every leaf into an
+  // array and filtered it per call; findLeaf runs on hot interaction paths
+  // (focus moves, splits, drag targets), so it now just walks the tree.
+  // Traversal order matches leaves(), so the first hit is the same node the
+  // filter used to return.
   function findLeaf(tree, id) {
-    const hit = leaves(tree).filter(function (l) { return l.id === id; });
-    return hit.length ? hit[0] : null;
+    if (!tree) return null;
+    if (tree.type === 'leaf') return tree.id === id ? tree : null;
+    const hit = findLeaf(tree.a, id);
+    return hit || findLeaf(tree.b, id);
   }
 
   /* ----- editing the tree -----

@@ -11,7 +11,7 @@ const { ConfigStore } = require('./config');
 const { WorkspaceManager, originApp } = require('./workspace');
 const { PtyManager } = require('./ptyManager');
 const { systemCheck, claudeStatus, bindClaudeToWorkspace, mcpSnippet } = require('./installer');
-const { resolveCommand } = require('./syscheck');
+const { resolveCommandAsync } = require('./syscheck');
 
 // LLM sites (Cloudflare-fronted ones especially) reject UAs that don't match
 // the real engine. Use Electron's own UA with the Electron/Tote tokens
@@ -667,12 +667,15 @@ ipcMain.on('pty:write', (e, { id, data }) => ptys.write(id, data));
 ipcMain.on('pty:resize', (e, { id, cols, rows }) => ptys.resize(id, cols, rows));
 ipcMain.on('pty:kill', (e, { id }) => ptys.kill(id));
 
-ipcMain.handle('cli:check', (e, command) => {
+ipcMain.handle('cli:check', async (e, command) => {
   if (!command) return true; // plain shell profile always works
+  // Async because every caller lives on the main process' event loop: the
+  // synchronous resolver parked that loop for as long as `where`/`which`
+  // needed (up to its 5s timeout), freezing ALL IPC including PTY traffic.
   // resolveCommand is truthful about the native OS: `where`/`which` only see
   // executables this platform can launch, so a WSL-only binary is correctly
   // reported missing rather than promised as available.
-  return !!resolveCommand(command);
+  return !!(await resolveCommandAsync(command));
 });
 
 // --- IPC: misc ---------------------------------------------------------------------------------------
@@ -696,7 +699,6 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     migrateFromOmniHub();
-    adoptLoginShellPath();
     configStore = new ConfigStore(app);
     workspace = new WorkspaceManager(configStore);
     // Stale temp spaces go at launch and only at launch, so nothing can vanish
@@ -708,6 +710,13 @@ if (!gotLock) {
     watchActive();
     applyBridgeSetting();
     createWindow();
+    // Paint FIRST, then adopt the login shell's PATH: an interactive login
+    // shell can take seconds to run its rc files (nvm/fnm/asdf hooks), and
+    // nothing below needs that PATH until the user acts -- the wizard's checks,
+    // ptyRun installs and local services all happen after first render. On a
+    // GUI launch this was previously wedging everything behind up to 5s of
+    // shell startup before the window existed at all.
+    adoptLoginShellPath();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

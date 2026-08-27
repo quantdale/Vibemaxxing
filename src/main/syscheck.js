@@ -4,6 +4,8 @@
 // logic so both can be unit-tested (scripts/test-syscheck.js).
 'use strict';
 
+const { execFile } = require('child_process');
+
 // --- versions -----------------------------------------------------------------
 
 // "v24.3.0", "24.3.0", "24.3" -> { major, minor, patch } ; garbage -> null.
@@ -134,6 +136,27 @@ function resolveCommand(cmd, opts) {
   }
 }
 
+// Async twin of resolveCommand for callers on a shared event loop -- IPC
+// handlers in Tote's main process. The sync version parks that loop for up to
+// its whole timeout on every call; this one only costs a thread-pool slot.
+function resolveCommandAsync(cmd, opts) {
+  if (!cmd || typeof cmd !== 'string') return Promise.resolve(null);
+  const o = opts || {};
+  const isWin = process.platform === 'win32';
+  return new Promise((resolve) => {
+    execFile(
+      o.resolver || (isWin ? 'where' : 'which'),
+      [cmd],
+      { timeout: o.timeout || 5000 },
+      (err, out) => {
+        if (err) return resolve(null);
+        const first = String(out).split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+        resolve(first || null);
+      },
+    );
+  });
+}
+
 module.exports = {
   parseVersion,
   nodeMajorOk,
@@ -141,4 +164,5 @@ module.exports = {
   classifyDoctor,
   electronVersionMismatch,
   resolveCommand,
+  resolveCommandAsync,
 };

@@ -6,6 +6,11 @@
 // only then renamed over the live file — so a crash mid-write can never leave
 // truncated JSON where valid state used to be. The previous good version is
 // kept as <name>.bak, and stale temporaries from crashed runs are swept.
+//
+// Reads go through a (size, mtimeMs)-validated in-memory cache: these files sit
+// on every hot path -- workspaces.json is re-read several times per download,
+// per tab, and per file op otherwise -- while staying editable from the outside
+// (an external save changes size and/or mtimeMs, invalidating the entry).
 const fs = require('fs');
 const path = require('path');
 
@@ -98,6 +103,8 @@ class ConfigStore {
         fs.copyFileSync(path.join(DEFAULTS_DIR, name), target);
       }
     }
+    // name -> { mtimeMs, size, value } | { mtimeMs, size, malformed: true }
+    this.cache = new Map();
   }
 
   getDir() {
@@ -105,11 +112,47 @@ class ConfigStore {
   }
 
   read(name, fallback) {
-    return readJsonSafe(path.join(this.dir, name), fallback);
+    const file = path.join(this.dir, name);
+    let st = null;
+    try { st = fs.statSync(file); } catch {}
+    const hit = this.cache.get(name);
+    if (st && hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+      // Same fingerprint as what we parsed/stalled on last time. A malformed
+      // file is remembered too, so a corrupt config produces exactly one
+      // .bak rather than one per call until someone fixes it.
+      return hit.malformed ? fallback : hit.value;
+    }
+    if (!st) {
+      this.cache.delete(name);
+      return fallback;
+    }
+    let malformed = false;
+    let value;
+    try {
+      value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+      // Same user-state policy as readJsonSafe: only a PARSE failure backs the
+      // file up; anything else (race with an external writer, permissions)
+      // quietly falls back until the next valid read.
+      if (e instanceof SyntaxError) {
+        malformed = true;
+        value = readJsonSafe(file, fallback);   // timestamped backup + log, once per version
+      } else {
+        value = fallback;
+      }
+    }
+    this.cache.set(name, malformed
+      ? { mtimeMs: st.mtimeMs, size: st.size, malformed: true }
+      : { mtimeMs: st.mtimeMs, size: st.size, value });
+    return value;
   }
 
   write(name, data) {
     writeJsonAtomic(path.join(this.dir, name), data);
+    // Drop the entry instead of seeding it: future reads re-parse the renamed
+    // file, which keeps snapshot semantics (a cached value handed to a caller
+    // who then mutates it must never leak into later reads).
+    this.cache.delete(name);
   }
 
   getProviders() { return this.read('providers.json', []); }

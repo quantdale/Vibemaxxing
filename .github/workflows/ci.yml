@@ -27,6 +27,17 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Electron itself (~100 MB) and electron-builder's NSIS/winCodeSign tools
+      # re-download on every run otherwise; keyed on the lockfile + builder so
+      # an upgrade busts the cache exactly when it must.
+      - name: Cache Electron and electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies (lockfile)
         run: npm ci --no-audit --no-fund
 
@@ -81,6 +92,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      - name: Cache Electron download
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
 
       # node-pty has no linux prebuilds, so npm ci compiles it from source;
       # the runner image already ships build-essential + python.

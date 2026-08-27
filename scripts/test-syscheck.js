@@ -7,12 +7,19 @@ const S = require('../src/main/syscheck.js');
 
 let pass = 0, fail = 0, skipped = 0;
 const describe = (name, fn) => { console.log('\n' + name); fn(); };
+const jobs = [];
 const test = (name, fn) => {
-  try { fn(); pass++; console.log('  \x1b[32m✓\x1b[0m ' + name); }
-  catch (e) {
-    if (e && e.skip) { skipped++; console.log('  \x1b[33m-\x1b[0m ' + name + '\n      skipped: ' + e.message); return; }
-    fail++; console.log('  \x1b[31m✗\x1b[0m ' + name + '\n      ' + e.message);
-  }
+  // Wrapped in a resolved-promise chain so both sync and async assertions are
+  // awaited before the summary at the bottom runs.
+  jobs.push(
+    Promise.resolve().then(fn).then(
+      () => { pass++; console.log('  \x1b[32m✓\x1b[0m ' + name); },
+      (e) => {
+        if (e && e.skip) { skipped++; console.log('  \x1b[33m-\x1b[0m ' + name + '\n      skipped: ' + e.message); return; }
+        fail++; console.log('  \x1b[31m✗\x1b[0m ' + name + '\n      ' + e.message);
+      },
+    ),
+  );
 };
 
 describe('parseVersion', () => {
@@ -150,5 +157,21 @@ describe('resolveCommand', () => {
   });
 });
 
-console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
-process.exit(fail ? 1 : 0);
+describe('resolveCommandAsync', () => {
+  test('agrees with the sync resolver and resolves a real binary', async function () {
+    const cmd = process.platform === 'win32' ? 'cmd.exe' : 'sh';
+    const p = await S.resolveCommandAsync(cmd);
+    if (p === null) throw { skip: `${cmd} not on PATH here` };
+    assert.strictEqual(p, S.resolveCommand(cmd));
+  });
+  test('resolves null for missing/fictional commands instead of throwing', async () => {
+    assert.strictEqual(await S.resolveCommandAsync('definitely-not-a-real-cli-tote'), null);
+    assert.strictEqual(await S.resolveCommandAsync(''), null);
+    assert.strictEqual(await S.resolveCommandAsync(null), null);
+  });
+});
+
+Promise.all(jobs).then(() => {
+  console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
+  process.exit(fail ? 1 : 0);
+});

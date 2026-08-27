@@ -12,6 +12,7 @@ const state = {
   tabs: new Map(), // tabId -> { wv: <webview>|null, providerId, wsId }  (webviews created lazily)
   activeTab: null, // tabId shown in the center (belongs to the active workspace)
   terms: new Map(), // termId -> { term, fit, ptyId, localId, pane, name, wsId, alive }
+  termByPty: new Map(), // ptyId -> the same entries, indexed for O(1) pty:data routing
   termSeq: 0,
   activeTerm: null,
   activeTermByWs: {}, // wsId -> termId last active there
@@ -369,15 +370,40 @@ $('#btn-add-tab').onclick = (e) => {
 document.addEventListener('click', () => $('#tab-add-menu').classList.add('hidden'));
 
 /* ---------------- workspace tree ---------------- */
-async function refreshTree() {
-  state.treeData = await tote.tree();
-  renderTree();
+// The tree data feeds ONLY the files dock. While no pane displays it, we skip
+// the IPC + full workspace walk entirely -- otherwise every watched filesystem
+// event batch pays a depth-5 scan for pixels nobody sees. A pending refresh is
+// remembered (treeStale) and applied as soon as the dock is shown again, so
+// behavior stays identical whenever the tree is actually visible.
+let treeStale = false;
+let treeFetchInFlight = false;
+
+const filesLeafVisible = () => {
+  const S = tiles();
+  return !!(S.tree && T.leaves(S.tree).some((l) => l.kind === 'files'));
+};
+
+async function refreshTree(force = false) {
+  if (!force && !filesLeafVisible()) { treeStale = true; return; }
+  if (treeFetchInFlight) return;   // one walk at a time; debounce lives in main
+  treeFetchInFlight = true;
+  try {
+    state.treeData = await tote.tree();
+    treeStale = false;
+    renderTree();
+  } finally {
+    treeFetchInFlight = false;
+  }
 }
 
 function renderTree() {
   const host = $('#tree');
+  // A rebuild replaces every row node; keep scroll position so toggling a
+  // folder deep down does not yank the user back to the top of the tree.
+  const keepScroll = host.scrollTop;
   host.innerHTML = '';
   host.appendChild(renderNodes(state.treeData));
+  host.scrollTop = keepScroll;
 }
 
 function renderNodes(nodes) {
@@ -668,6 +694,7 @@ function killTermByRef(localId) {
   const hit = [...state.terms].find(([, t]) => t.localId === localId);
   if (!hit) return;
   const [id, t] = hit;
+  unindexTerm(t);
   if (t.alive) tote.ptyKill(t.ptyId);
   state.terms.delete(id);
 }
@@ -675,10 +702,15 @@ function killTermByRef(localId) {
 async function renderTermMenu() {
   const menu = $('#term-menu');
   menu.innerHTML = '';
-  for (const p of state.profiles) {
+  // Availability probes are child processes (`where`/`which`): resolve every
+  // uncached profile concurrently instead of parking each behind the previous
+  // spawn, so first paint of the menu waits on one round, not N sequential ones.
+  await Promise.all(state.profiles.map(async (p) => {
     if (!state.cliAvail.has(p.id)) {
       state.cliAvail.set(p.id, await tote.checkCommand(p.command));
     }
+  }));
+  for (const p of state.profiles) {
     const item = document.createElement('div');
     item.className = 'term-menu-item';
     const dot = document.createElement('span');
@@ -806,6 +838,7 @@ async function spawnTerm(profile) {
       return;
     }
     entry.ptyId = res.id;
+    state.termByPty.set(res.id, entry);
     entry.alive = true;
     pane.el.title = res.workspace + ' · cwd: ' + res.cwd;
     term.writeln('\x1b[90m[Tote] workspace "' + res.workspace + '" · cwd ' + res.cwd + '\x1b[0m');
@@ -836,6 +869,7 @@ function closeTerm(id) {
     return;
   }
   if (lf) owner.tree = T.removeLeaf(owner.tree, lf.id);
+  unindexTerm(t);
   if (t.alive) tote.ptyKill(t.ptyId);
   destroyPaneEl('term:' + id);
   state.terms.delete(id);
@@ -843,24 +877,27 @@ function closeTerm(id) {
   saveViews();
 }
 
+// Route incoming PTY bytes without scanning every session per message: the
+// ptyId -> entry index is maintained at spawn/teardown. Main coalesces chunks
+// into one message per short window; this is the receiving half of that path.
 tote.onPtyData((ptyId, data) => {
-  for (const t of state.terms.values()) {
-    if (t.ptyId === ptyId) {
-      t.term.write(data);
-      return;
-    }
-  }
+  const t = state.termByPty.get(ptyId);
+  if (t) { t.term.write(data); return; }
   if (wizTerm && ptyId === wizTermPty) wizTerm.write(data);
 });
 
+const unindexTerm = (t) => {
+  if (t && t.ptyId != null) state.termByPty.delete(t.ptyId);
+};
+
 tote.onPtyExit((ptyId, code) => {
-  for (const t of state.terms.values()) {
-    if (t.ptyId === ptyId) {
-      t.alive = false;
-      if (t.pane) t.pane.el.classList.add('dead');
-      t.term.writeln('\r\n\x1b[90m[process exited with code ' + code + ']\x1b[0m');
-      return;
-    }
+  const t = state.termByPty.get(ptyId);
+  unindexTerm(t);
+  if (t) {
+    t.alive = false;
+    if (t.pane) t.pane.el.classList.add('dead');
+    t.term.writeln('\r\n\x1b[90m[process exited with code ' + code + ']\x1b[0m');
+    return;
   }
   if (wizOnExit) wizOnExit(ptyId, code);
 });
@@ -1005,6 +1042,9 @@ function mountLeaf(lf) {
   if (lf.kind === 'files') {
     const p = paneShell(key, 'files');
     if (!p.body.firstChild) p.body.appendChild($('#files-panel'));
+    // Coming back to a dock that was closed (or was not mounted when events
+    // arrived): pull whatever the watcher recorded in the meantime.
+    if (treeStale) void refreshTree();
     return p;
   }
   if (lf.kind === 'web') {
@@ -1217,7 +1257,7 @@ function startDividerDrag(e, d) {
     document.body.classList.remove('dragging');
     removeEventListener('mousemove', move);
     removeEventListener('mouseup', up);
-    refitTerms(true);
+    refitTerms();
     saveViews();
   };
   addEventListener('mousemove', move);
@@ -1643,7 +1683,7 @@ $('#nc-add').onclick = async () => {
 /* ---------------- sidebar buttons ---------------- */
 $('#btn-new-file').onclick = () => newFile('.');
 $('#btn-new-folder').onclick = () => newFolder('.');
-$('#btn-refresh').onclick = refreshTree;
+$('#btn-refresh').onclick = () => refreshTree(true);
 
 /* ---------------- setup wizard ---------------- */
 let wizStep = 0;
@@ -1709,9 +1749,14 @@ async function renderWzSystem() {
 async function renderWzClis() {
   const host = $('#wz-clis');
   host.innerHTML = '';
+  // Each check spawns a child process; probe them all at once so the step
+  // opens after a single round rather than N serial `where`/`which` runs.
+  const installedById = new Map(await Promise.all(
+    state.profiles.map(async (p) => [p.id, await tote.checkCommand(p.command)]),
+  ));
   for (const p of state.profiles) {
     if (p.id === 'shell') continue;
-    const installed = await tote.checkCommand(p.command);
+    const installed = installedById.get(p.id);
     const btn = document.createElement('button');
     if (installed) {
       btn.textContent = 'installed';
@@ -1881,23 +1926,37 @@ tote.onDownloadDone((m) => {
 
 /* ---------------- boot ---------------- */
 (async function init() {
-  const avail = await tote.ptyAvailable();
+  // One parallel round of reads instead of seven sequential IPC round-trips:
+  // nothing here depends on another's result, and the tree fetch is kicked off
+  // alongside them (boot refreshes unconditionally -- the dock may be open in
+  // the restored layout).
+  const treePromise = tote.tree();
+  const [avail, providers, profiles, apps, settings, workspaces, views] = await Promise.all([
+    tote.ptyAvailable(),
+    tote.getProviders(),
+    tote.getCliProfiles(),
+    tote.listApps(),
+    tote.getSettings(),
+    tote.listWorkspaces(),
+    tote.getViews(),
+  ]);
   if (!avail.ok) {
     toast(
       `terminals disabled: ${avail.label || 'node-pty unavailable'}${avail.hint ? ' - fix: ' + avail.hint : ''}`,
       'error',
     );
   }
-  state.providers = await tote.getProviders();
-  state.profiles = await tote.getCliProfiles();
-  state.apps = await tote.listApps();
-  state.settings = await tote.getSettings();
-  state.workspaces = await tote.listWorkspaces();
-  state.views = (await tote.getViews()) || {};
+  state.providers = providers;
+  state.profiles = profiles;
+  state.apps = apps;
+  state.settings = settings;
+  state.workspaces = workspaces;
+  state.views = views || {};
   adoptLeafSeq(state.views);   // never re-issue a persisted pane id
   renderWorkspaceSwitcher();
   showWorkspaceViews();
-  await refreshTree();
+  state.treeData = await treePromise;
+  renderTree();
   if (state.settings.setupDone === false) {
     wizStep = 0;
     openWizard();
