@@ -32,3 +32,9 @@ Electron hub app: web LLM tabs + shared workspace folder + docked CLI-agent term
 - **Nothing process-spawning is synchronous in IPC handlers**: `cli:check` → `resolveCommandAsync`, `setup:systemCheck` → parallelized async probes (`installer.js`). The sync twins in `syscheck.js` exist only for scripts/doctor.js, which run standalone.
 - **The window paints before `adoptLoginShellPath()`** runs (main.js whenReady). A login shell can burn seconds sourcing rc files; nothing needs its PATH until first user action, so keep that order if you touch startup.
 - `npm run bench` measures the cached-vs-fresh config read path, TileTree ops, and coalescer reduction (numbers are machine-specific medians; compare before/after on the same box).
+
+## Cross-project UX, DX, and AX principles
+
+Cut taglines, helper text and secondary labels. If a screen needs them to make sense, fix the layout.
+
+Make the best decision that will elevate all three: the user experience (UX), developer experience (DX), and agent experience (AX) always, without breaking anything.
